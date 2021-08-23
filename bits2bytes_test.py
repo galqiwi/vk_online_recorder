@@ -35,6 +35,10 @@ class Bits2BytesTests(unittest.TestCase):
         input_bits = input_bits.reshape(-1)
         self.bits2bytes2bits(input_bits)
 
+    def test_zero_trim(self):
+        input_bits = np.full(shape=(8,), fill_value=True, dtype=bool)
+        self.bits2bytes2bits(input_bits)
+
 
 if __name__ == '__main__':
     unittest.main()

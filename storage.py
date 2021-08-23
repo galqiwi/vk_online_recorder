@@ -2,6 +2,7 @@ from bits2bytes import bits2bytes, bytes2bits
 import numpy as np
 from db_wrapper import Database
 from dataclasses import dataclass
+import datetime
 import zlib
 
 
@@ -15,29 +16,42 @@ class Storage:
     def __init__(self, db_path='storage.db', reset=False):
         self.database = Database(db_path=db_path, reset=reset)
 
+    @staticmethod
+    def _convert_date_to_hot_snapshot_table_name(date):
+        return f'hot_{date.strftime("%Y_%m_%d")}'
+
+    @staticmethod
+    def _convert_date_to_hot_users_table_name(date):
+        return f'hot_users_{date.strftime("%Y_%m_%d")}'
+
     def has_date(self, date):
-        return self.database.table_exists(f'hot_{date}')
+        snapshot_table = self._convert_date_to_hot_snapshot_table_name(date)
+        return self.database.table_exists(f'{snapshot_table}')
 
     def _initialise_hot_tables_if_needed(self, date):
+        snapshot_table = self._convert_date_to_hot_snapshot_table_name(date)
+        user_table = self._convert_date_to_hot_users_table_name(date)
         self.database.execute(
             f'create table if not exists '
-            f'hot_{date}(minute_id INT, snapshot BLOB)'
+            f'{snapshot_table}(minute_id INT, snapshot BLOB)'
         )
         self.database.execute(
             f'create table if not exists '
-            f'hot_users_{date}(user_id INT)'
+            f'{user_table}(user_id INT)'
         )
 
     def _get_all_users_available_in_hot_date(self, date):
+        user_table = self._convert_date_to_hot_users_table_name(date)
         return [
             _[0] for _ in self.database.execute(
-                f'select user_id from hot_users_{date}'
+                f'select user_id from {user_table}'
             ).response]
 
     def _add_users_to_hot_day_if_needed(self, date, users):
+        user_table = self._convert_date_to_hot_users_table_name(date)
         all_users_set = set(self._get_all_users_available_in_hot_date(date))
         self.database.executemany(
-            f'insert into hot_users_{date} values (?)',
+            f'insert into {user_table} values (?)',
             [(user_id,) for user_id in users if user_id not in all_users_set])
 
     def _get_hot_day_snapshot(self, date, data):
@@ -61,17 +75,21 @@ class Storage:
         return zlib.compress(bits2bytes(snapshot))
 
     def _get_all_snapshots_by_hot_date(self, date):
-        return self.database.execute(f'select * from hot_{date}').response
+        snapshot_table = self._convert_date_to_hot_snapshot_table_name(date)
+        return self.database.execute(
+            f'select * from {snapshot_table}').response
 
-    def _get_maximum_minute_id_on_hot_date(self, date, default_v=-1):
+    def _get_maximum_minute_id_on_hot_date(self, date, default=-1):
+        snapshot_table = self._convert_date_to_hot_snapshot_table_name(date)
         max_minute = self.database.execute(
-            f'select max(minute_id) from hot_{date}').response[0][0]
-        return max_minute if max_minute is not None else default_v
+            f'select max(minute_id) from {snapshot_table}').response[0][0]
+        return max_minute if max_minute is not None else default
 
     class MinuteIdIsNotIncreasing(Exception):
         pass
 
     def add(self, minute_id, date, data):
+        snapshot_table = self._convert_date_to_hot_snapshot_table_name(date)
         self._initialise_hot_tables_if_needed(date)
         snapshot = self._get_hot_day_snapshot(date, data)
 
@@ -82,7 +100,7 @@ class Storage:
             raise self.MinuteIdIsNotIncreasing()
 
         self.database.execute(
-            f'insert into hot_{date} values (?, ?)',
+            f'insert into {snapshot_table} values (?, ?)',
             (minute_id, snapshot)
         )
 
